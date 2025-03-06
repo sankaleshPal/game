@@ -9,6 +9,7 @@ import { Film, SkipForward, Play, Pause } from "lucide-react"
 
 export default function MovieGame() {
   const [movie, setMovie] = useState<string | null>(null)
+  const [posterPath, setPosterPath] = useState<string | null>(null)
   const [timeLeft, setTimeLeft] = useState(300) // 5 minutes in seconds
   const [isTimerRunning, setIsTimerRunning] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -19,7 +20,6 @@ export default function MovieGame() {
 
   useEffect(() => {
     audioRef.current = new Audio("/alarm.mp3")
-
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
@@ -96,6 +96,7 @@ export default function MovieGame() {
       // Pick a random movie from available ones
       const randomMovie = availableMovies[Math.floor(Math.random() * availableMovies.length)]
       setMovie(randomMovie.title)
+      setPosterPath(randomMovie.poster_path)
       setUsedMovies((prev) => [...prev, randomMovie.title])
 
       // Reset and start timer
@@ -140,8 +141,29 @@ export default function MovieGame() {
         <CardContent className="space-y-6">
           {movie ? (
             <div className="space-y-6">
-              <div className="rounded-lg bg-gradient-to-r from-purple-500 to-blue-500 p-6 text-center shadow-md">
-                <h2 className="text-xl font-bold text-white">{movie}</h2>
+              <div className="rounded-lg overflow-hidden bg-gradient-to-r from-purple-500 to-blue-500 shadow-md">
+                {posterPath ? (
+                  <>
+                    <div className="relative aspect-[2/3] w-full max-w-[240px] mx-auto">
+                      <img
+                        src={`https://image.tmdb.org/t/p/w500${posterPath}`}
+                        alt={movie || "Movie poster"}
+                        className="object-cover w-full h-full"
+                        onError={(e) => {
+                          // If image fails to load, show a fallback
+                          e.currentTarget.src = "/placeholder.svg?height=360&width=240"
+                        }}
+                      />
+                    </div>
+                    <div className="p-6 text-center">
+                      <h2 className="text-xl font-bold text-white">{movie}</h2>
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-6 text-center">
+                    <h2 className="text-xl font-bold text-white">{movie}</h2>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
