@@ -1,11 +1,15 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
+import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { useToast } from "@/components/ui/use-toast"
 import { Film, SkipForward, Play, Pause } from "lucide-react"
+
+// Store movie IDs we've already seen
+const API_KEY = "32834110425a5a6e9f32ddcd98163eec"
 
 export default function MovieGame() {
   const [movie, setMovie] = useState<string | null>(null)
@@ -13,13 +17,43 @@ export default function MovieGame() {
   const [timeLeft, setTimeLeft] = useState(300) // 5 minutes in seconds
   const [isTimerRunning, setIsTimerRunning] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-  const [usedMovies, setUsedMovies] = useState<string[]>([])
+  const [usedMovieIds, setUsedMovieIds] = useState<number[]>([])
+  const [availableIds, setAvailableIds] = useState<number[]>([])
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const { toast } = useToast()
 
+  // Fetch a list of Hindi movie IDs once on component mount
+  useEffect(() => {
+    const fetchMovieIds = async () => {
+      try {
+        // We'll fetch just the IDs first to have a pool to select from
+        const response = await fetch(
+          `https://api.themoviedb.org/3/discover/movie?api_key=${API_KEY}&with_original_language=hi&page=1&per_page=20`,
+        )
+
+        if (!response.ok) {
+          throw new Error(`API responded with status: ${response.status}`)
+        }
+
+        const data = await response.json()
+
+        if (data.results && Array.isArray(data.results)) {
+          // Extract just the IDs
+          const ids = data.results.map((movie: any) => movie.id)
+          setAvailableIds(ids)
+        }
+      } catch (error) {
+        console.error("Error fetching movie IDs:", error)
+      }
+    }
+
+    fetchMovieIds()
+  }, [])
+
   useEffect(() => {
     audioRef.current = new Audio("/alarm.mp3")
+
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
@@ -55,49 +89,64 @@ export default function MovieGame() {
   const fetchMovie = async () => {
     setIsLoading(true)
     try {
-      // Using TMDB API to get Hindi movies
-      const response = await fetch(
-        `https://api.themoviedb.org/3/discover/movie?api_key=32834110425a5a6e9f32ddcd98163eec&with_original_language=hi&page=${Math.floor(
-          Math.random() * 10 + 1,
-        )}`,
-      )
+      // If we don't have any available IDs yet or we've used them all, fetch more
+      if (availableIds.length === 0 || availableIds.length === usedMovieIds.length) {
+        // Get a random page number between 1 and 10
+        const randomPage = Math.floor(Math.random() * 10) + 1
 
-      if (!response.ok) {
-        throw new Error(`API responded with status: ${response.status}`)
+        const idsResponse = await fetch(
+          `https://api.themoviedb.org/3/discover/movie?api_key=${API_KEY}&with_original_language=hi&page=${randomPage}`,
+        )
+
+        if (!idsResponse.ok) {
+          throw new Error(`API responded with status: ${idsResponse.status}`)
+        }
+
+        const idsData = await idsResponse.json()
+
+        if (!idsData.results || !Array.isArray(idsData.results) || idsData.results.length === 0) {
+          throw new Error("No movie results found")
+        }
+
+        // Extract just the IDs
+        const newIds = idsData.results.map((movie: any) => movie.id)
+        setAvailableIds(newIds)
+
+        // If we've reset our available IDs, also reset used IDs
+        if (availableIds.length === usedMovieIds.length) {
+          setUsedMovieIds([])
+        }
       }
 
-      const data = await response.json()
+      // Filter out IDs we've already used
+      const unusedIds = availableIds.filter((id) => !usedMovieIds.includes(id))
 
-      // Check if data.results exists and is an array
-      if (!data.results || !Array.isArray(data.results) || data.results.length === 0) {
-        console.error("API response doesn't contain expected results:", data)
-        toast({
-          title: "API Error",
-          description: "Couldn't find any Hindi movies. Please try again later.",
-          variant: "destructive",
-        })
-        return
-      }
-
-      // Filter out movies we've already used
-      const availableMovies = data.results.filter((m) => m.title && !usedMovies.includes(m.title))
-
-      if (availableMovies.length === 0) {
+      if (unusedIds.length === 0) {
         toast({
           title: "No more movies!",
           description: "You've gone through all available movies. Resetting list.",
           variant: "destructive",
         })
-        setUsedMovies([])
-        setMovie(null)
-        return
+        setUsedMovieIds([])
+        return fetchMovie() // Try again with reset list
       }
 
-      // Pick a random movie from available ones
-      const randomMovie = availableMovies[Math.floor(Math.random() * availableMovies.length)]
-      setMovie(randomMovie.title)
-      setPosterPath(randomMovie.poster_path)
-      setUsedMovies((prev) => [...prev, randomMovie.title])
+      // Pick a random unused ID
+      const randomId = unusedIds[Math.floor(Math.random() * unusedIds.length)]
+
+      // Now fetch just this one movie's details
+      const movieResponse = await fetch(`https://api.themoviedb.org/3/movie/${randomId}?api_key=${API_KEY}`)
+
+      if (!movieResponse.ok) {
+        throw new Error(`API responded with status: ${movieResponse.status}`)
+      }
+
+      const movieData = await movieResponse.json()
+
+      // Update state with this single movie
+      setMovie(movieData.title)
+      setPosterPath(movieData.poster_path)
+      setUsedMovieIds((prev) => [...prev, randomId])
 
       // Reset and start timer
       setTimeLeft(300)
@@ -141,29 +190,28 @@ export default function MovieGame() {
         <CardContent className="space-y-6">
           {movie ? (
             <div className="space-y-6">
-              <div className="rounded-lg overflow-hidden bg-gradient-to-r from-purple-500 to-blue-500 shadow-md">
+              <div className="rounded-lg overflow-hidden shadow-md">
                 {posterPath ? (
-                  <>
-                    <div className="relative aspect-[2/3] w-full max-w-[240px] mx-auto">
-                      <img
-                        src={`https://image.tmdb.org/t/p/w500${posterPath}`}
-                        alt={movie || "Movie poster"}
-                        className="object-cover w-full h-full"
-                        onError={(e) => {
-                          // If image fails to load, show a fallback
-                          e.currentTarget.src = "/placeholder.svg?height=360&width=240"
-                        }}
-                      />
-                    </div>
-                    <div className="p-6 text-center">
-                      <h2 className="text-xl font-bold text-white">{movie}</h2>
-                    </div>
-                  </>
+                  <div className="relative w-full h-[350px] mx-auto">
+                    <Image
+                      src={`https://image.tmdb.org/t/p/w500${posterPath}`}
+                      alt={movie}
+                      fill
+                      sizes="(max-width: 768px) 100vw, 300px"
+                      className="object-contain"
+                      priority
+                      onError={() => setPosterPath(null)}
+                    />
+                  </div>
                 ) : (
-                  <div className="p-6 text-center">
+                  <div className="p-6 text-center bg-gradient-to-r from-purple-500 to-blue-500 h-[350px] flex items-center justify-center">
                     <h2 className="text-xl font-bold text-white">{movie}</h2>
                   </div>
                 )}
+              </div>
+
+              <div className="text-center">
+                <h2 className="text-xl font-bold">{movie}</h2>
               </div>
 
               <div className="space-y-2">
